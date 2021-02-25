@@ -2,6 +2,10 @@ use async_channel::{bounded, Receiver, Sender};
 use std::sync::atomic::*;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+#[cfg(any(feature = "async-rt"))]
+use async_std::future as time;
+#[cfg(any(feature = "tokio-rt"))]
 use tokio::time;
 
 pub use async_trait::async_trait;
@@ -27,41 +31,51 @@ impl<M: Manager> Pool<M> {
             check: Some(Duration::from_secs(10)),
         }
     }
+
     pub fn state(&self) -> State {
         self.shared.status.state()
     }
+
     pub async fn get(&self) -> Result<PooledConnection<M>, Error<M::Error>> {
-        let _wait = Arc::downgrade(&self.shared.status.0);
-        let fut = async {
-            let mut conn = self.shared.mc.recv().await.unwrap();
-            if conn.is_empty() {
-                let con = self.shared.manager.connect().await?;
-                conn.con = Some(con);
-            }
-
-            // todo: incheck should drop _wait?
-            if let Some(check) = self.shared.cfg.check {
-                if check == Duration::from_secs(0)
-                    || self.shared.clock.elapsed() >= (conn.time + check)
-                {
-                    self.shared
-                        .manager
-                        .check(conn.con.as_mut().unwrap())
-                        .await?;
-                    conn.time = self.shared.clock.elapsed();
-                }
-            }
-
-            return Ok(PooledConnection::new(conn));
-        };
+        let mut error = "wait";
 
         if let Some(timeout) = self.shared.cfg.timeout {
-            time::timeout(timeout, fut)
-                .await
-                .map_err(|_| Error::Timeout)?
+            match time::timeout(timeout, self.get_inner(&mut error)).await {
+                Ok(res) => res,
+                Err(_) => Err(Error::Timeout(error)),
+            }
         } else {
-            fut.await
+            self.get_inner(&mut error).await
         }
+    }
+
+    async fn get_inner(
+        &self,
+        error: &mut &'static str,
+    ) -> Result<PooledConnection<M>, Error<M::Error>> {
+        let _wait = Arc::downgrade(&self.shared.status.0);
+
+        let mut conn = self.shared.mc.recv().await.map_err(|_| Error::Closed)?;
+        if conn.is_empty() {
+            *error = "connect";
+            let con = self.shared.manager.connect().await?;
+            conn.con = Some(con);
+        }
+
+        // todo: incheck should drop _wait?
+        if let Some(check) = self.shared.cfg.check {
+            if check == Duration::from_secs(0) || self.shared.clock.elapsed() >= (conn.time + check)
+            {
+                *error = "check";
+                self.shared
+                    .manager
+                    .check(conn.con.as_mut().unwrap())
+                    .await?;
+                conn.time = self.shared.clock.elapsed();
+            }
+        }
+
+        return Ok(PooledConnection::new(conn));
     }
 }
 
@@ -252,16 +266,28 @@ impl<M: Manager> PooledConnection<M> {
     }
 }
 
+impl<M: Manager> AsRef<M::Connection> for PooledConnection<M> {
+    fn as_ref(&self) -> &M::Connection {
+        self.0.as_ref().unwrap().con.as_ref().unwrap()
+    }
+}
+
+impl<M: Manager> AsMut<M::Connection> for PooledConnection<M> {
+    fn as_mut(&mut self) -> &mut M::Connection {
+        self.0.as_mut().unwrap().con.as_mut().unwrap()
+    }
+}
+
 impl<M: Manager> std::ops::Deref for PooledConnection<M> {
     type Target = M::Connection;
     fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap().con.as_ref().unwrap()
+        self.as_ref()
     }
 }
 
 impl<M: Manager> std::ops::DerefMut for PooledConnection<M> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap().con.as_mut().unwrap()
+        self.as_mut()
     }
 }
 

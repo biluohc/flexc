@@ -4,9 +4,9 @@ pub enum Error<E> {
     /// Manager Errors
     Inner(E),
     /// Timeout
-    Timeout,
-    /// BadConn
-    BadConn,
+    Timeout(&'static str),
+    /// Pool already closed
+    Closed,
 }
 
 impl<E> From<E> for Error<E> {
@@ -22,8 +22,8 @@ where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Error::Inner(ref err) => write!(f, "{}", err),
-            Error::Timeout => write!(f, "Timed out in flexc"),
-            Error::BadConn => write!(f, "Bad connection in flexc"),
+            Error::Timeout(loc) => write!(f, "Timed out in flexc.{}", loc),
+            Error::Closed => write!(f, "Pool Closed in flexc"),
         }
     }
 }
@@ -35,8 +35,8 @@ where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Error::Inner(ref err) => write!(f, "{:?}", err),
-            Error::Timeout => write!(f, "Timed out in flexc"),
-            Error::BadConn => write!(f, "Bad connection in flexc"),
+            Error::Timeout(loc) => write!(f, "Timed out in flexc.{}", loc),
+            Error::Closed => write!(f, "Pool Closed in flexc"),
         }
     }
 }
@@ -48,8 +48,7 @@ where
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match *self {
             Error::Inner(ref err) => Some(err),
-            Error::Timeout => None,
-            Error::BadConn => None,
+            _ => None,
         }
     }
 }

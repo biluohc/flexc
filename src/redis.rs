@@ -1,5 +1,4 @@
-use crate::Manager;
-use async_trait::async_trait;
+use crate::{async_trait, Manager};
 use redis::aio::Connection;
 use redis::{Client, ErrorKind, RedisError};
 use std::sync::atomic::*;
