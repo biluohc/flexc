@@ -1,12 +1,10 @@
-use async_channel::{bounded, Receiver, Sender};
+use crossbeam_queue::ArrayQueue;
 use std::sync::atomic::*;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-#[cfg(any(feature = "async-rt"))]
-use async_std::future as time;
 #[cfg(any(feature = "tokio-rt"))]
-use tokio::time;
+use tokio::{sync::Semaphore, time};
 
 pub use async_trait::async_trait;
 pub use error::Error;
@@ -15,7 +13,7 @@ mod error;
 pub mod redis;
 
 pub struct Pool<M: Manager> {
-    shared: SharedPool<M>,
+    shared: Arc<SharedPool<M>>,
 }
 
 impl<M: Manager> Pool<M> {
@@ -25,11 +23,7 @@ impl<M: Manager> Pool<M> {
     }
 
     pub fn builder() -> Builder {
-        Builder {
-            cap: 20,
-            timeout: Some(Duration::from_secs(5)),
-            check: Some(Duration::from_secs(10)),
-        }
+        Builder::default()
     }
 
     pub fn state(&self) -> State {
@@ -37,6 +31,7 @@ impl<M: Manager> Pool<M> {
     }
 
     pub async fn get(&self) -> Result<PooledConnection<M>, Error<M::Error>> {
+        let _wait = Arc::downgrade(&self.shared.status.0);
         let mut error = "wait";
 
         if let Some(timeout) = self.shared.cfg.timeout {
@@ -53,48 +48,74 @@ impl<M: Manager> Pool<M> {
         &self,
         error: &mut &'static str,
     ) -> Result<PooledConnection<M>, Error<M::Error>> {
-        let _wait = Arc::downgrade(&self.shared.status.0);
+        let mut try_once_time = true;
 
-        let mut conn = self.shared.mc.recv().await.map_err(|_| Error::Closed)?;
-        if conn.is_empty() {
-            *error = "connect";
-            let con = self.shared.manager.connect().await?;
-            conn.con = Some(con);
-        }
-
-        // todo: incheck should drop _wait?
-        if let Some(check) = self.shared.cfg.check {
-            if check == Duration::from_secs(0) || self.shared.clock.elapsed() >= (conn.time + check)
-            {
-                *error = "check";
-                self.shared
-                    .manager
-                    .check(conn.con.as_mut().unwrap())
-                    .await?;
-                conn.time = self.shared.clock.elapsed();
+        loop {
+            let permit = if try_once_time {
+                try_once_time = false;
+                match self.shared.semaphore.try_acquire() {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                }
+            } else {
+                self.shared.semaphore.acquire().await
+            };
+            let conn = self.shared.queue.pop();
+            permit.forget();
+            if conn.is_none() {
+                continue;
             }
-        }
 
-        return Ok(PooledConnection::new(conn));
+            let mut conn = conn.unwrap();
+            if conn.is_empty() {
+                *error = "connect";
+                let con = self.shared.manager.connect().await?;
+                conn.con = Some(con);
+            }
+
+            // todo: incheck should drop _wait?
+            if let Some(check) = self.shared.cfg.check {
+                if check == Duration::from_secs(0)
+                    || self.shared.clock.elapsed() >= (conn.time + check)
+                {
+                    *error = "check";
+                    self.shared
+                        .manager
+                        .check(conn.con.as_mut().unwrap())
+                        .await?;
+                    conn.time = self.shared.clock.elapsed();
+                }
+            }
+
+            return Ok(PooledConnection::new(conn));
+        }
     }
 }
 
 impl<M: Manager> Drop for Pool<M> {
-    fn drop(&mut self) {
-        assert!(self.shared.mc.close(), "pool closed twice");
-    }
+    fn drop(&mut self) {}
 }
-
+#[derive(Clone, Debug)]
 pub struct Builder {
-    cap: usize,
+    maxsize: usize,
     check: Option<Duration>,
     timeout: Option<Duration>,
 }
 
+impl Default for Builder {
+    fn default() -> Self {
+        Self {
+            maxsize: 20,
+            timeout: Some(Duration::from_secs(5)),
+            check: Some(Duration::from_secs(10)),
+        }
+    }
+}
+
 impl Builder {
-    pub fn cap(mut self, cap: usize) -> Self {
-        assert!(cap > 0);
-        self.cap = cap;
+    pub fn maxsize(mut self, maxsize: usize) -> Self {
+        assert!(maxsize > 0);
+        self.maxsize = maxsize;
         self
     }
     /*
@@ -114,11 +135,11 @@ impl Builder {
         self
     }
     pub fn build<M: Manager>(self, manager: M) -> Pool<M> {
-        let shared = SharedPool::new(self, manager);
+        let shared = Arc::new(SharedPool::new(self, manager));
 
-        for idx in 0..shared.cfg.cap {
+        for idx in 0..shared.cfg.maxsize {
             let conn = Conn::new(idx, &shared);
-            shared.mp.try_send(conn).unwrap();
+            shared.queue.push(conn).ok();
         }
 
         Pool { shared }
@@ -132,8 +153,8 @@ pub(crate) const STATUS_IDLE: u8 = 2;
 pub(crate) struct Status(Arc<Vec<AtomicU8>>);
 
 impl Status {
-    pub fn new(cap: usize) -> Self {
-        let this = (0..cap)
+    pub fn new(maxsize: usize) -> Self {
+        let this = (0..maxsize)
             .into_iter()
             .map(|_| AtomicU8::new(STATUS_EMPTY))
             .collect::<Vec<_>>();
@@ -154,7 +175,7 @@ impl Status {
 
     pub fn state(&self) -> State {
         let mut state = State::default();
-        state.max_open = self.0.len() as _;
+        state.maxsize = self.0.len() as _;
 
         for (idx, s) in self.0.as_slice().iter().enumerate() {
             let s = s.load(Ordering::Relaxed);
@@ -175,7 +196,7 @@ impl Status {
 /// Information about the state of a `Pool`.
 pub struct State {
     /// Maximum number of open connections to the database
-    pub max_open: u32,
+    pub maxsize: u32,
 
     // Pool Status
     /// The number of established connections both in use and idle.
@@ -191,22 +212,23 @@ pub struct State {
 pub(crate) struct SharedPool<M: Manager> {
     cfg: Builder,
     manager: M,
-    mp: Sender<Conn<M>>,
-    mc: Receiver<Conn<M>>,
+    semaphore: Semaphore,
+    queue: ArrayQueue<Conn<M>>,
     status: Status,
     clock: Instant,
 }
 
 impl<M: Manager> SharedPool<M> {
     pub(crate) fn new(cfg: Builder, manager: M) -> Self {
-        let (mp, mc) = bounded(cfg.cap);
-        let status = Status::new(cfg.cap);
+        let semaphore = Semaphore::new(cfg.maxsize);
+        let queue = ArrayQueue::new(cfg.maxsize);
+        let status = Status::new(cfg.maxsize);
         Self {
             cfg,
             manager,
-            mp,
-            mc,
             status,
+            queue,
+            semaphore,
             clock: Instant::now(),
         }
     }
@@ -236,16 +258,16 @@ pub(crate) struct Conn<M: Manager> {
     idx: usize,
     time: Duration,
     status: Status,
-    mp: Sender<Conn<M>>,
+    shared: Weak<SharedPool<M>>,
     con: Option<M::Connection>,
 }
 
 impl<M: Manager> Conn<M> {
-    pub(crate) fn new(idx: usize, shared: &SharedPool<M>) -> Self {
+    pub(crate) fn new(idx: usize, shared: &Arc<SharedPool<M>>) -> Self {
         Self {
             idx,
+            shared: Arc::downgrade(shared),
             status: shared.status.clone(),
-            mp: shared.mp.clone(),
             time: Duration::from_secs(0),
             con: None,
         }
@@ -300,12 +322,10 @@ impl<M: Manager> Drop for PooledConnection<M> {
             conn.status.set_idle(conn.idx);
         }
 
-        // not clone this sender
-        let mp = unsafe { std::mem::transmute::<&Sender<_>, &'static Sender<_>>(&conn.mp) };
-
-        // the pool already dropped
-        if !mp.is_closed() {
-            mp.try_send(conn).ok();
+        // the pool not dropped
+        if let Some(p) = conn.shared.upgrade() {
+            p.queue.push(conn).ok();
+            p.semaphore.add_permits(1);
         }
     }
 }

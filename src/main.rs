@@ -14,7 +14,7 @@ const REDIS_URL: &str = "redis://127.0.0.1:6379/";
 async fn main() {
     let client = redis::Client::open(REDIS_URL).unwrap();
     let manager = RedisConnectionManager::new(client);
-    let pool = Arc::new(Pool::builder().cap(20).build(manager));
+    let pool = Arc::new(Pool::builder().maxsize(20).build(manager));
     println!("state: {:?}", pool.state());
 
     let mut conn = pool.get().await.unwrap();
@@ -24,7 +24,7 @@ async fn main() {
 
     const MAX: usize = 5000;
     let now = Instant::now();
-    let (tx, rx) = async_channel::bounded::<usize>(5000);
+    let (tx, rx) = async_channel::bounded::<usize>(MAX);
     for i in 0..MAX {
         let pool = pool.clone();
         let tx_c = tx.clone();
