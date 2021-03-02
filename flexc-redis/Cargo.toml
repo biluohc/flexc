@@ -6,8 +6,11 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dev-dependencies]
+futures = "0.3"
 async-channel = "1.6"
 tokio = { version = "0.2", features = [ "full" ] }
+mpmc = { package = "crossbeam-channel", version = "0.5.0" }
+num_cpus = "1.13.0"
 
 [dependencies]
 flexc = { path = "../" }

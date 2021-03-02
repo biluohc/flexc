@@ -3,6 +3,7 @@ use redis::aio::Connection;
 use redis::{Client, ErrorKind, RedisError};
 use std::sync::atomic::*;
 
+pub use flexc::Builder;
 pub type Pool = flexc::Pool<RedisConnectionManager>;
 pub type PooledConnection = flexc::PooledConnection<RedisConnectionManager>;
 pub type Error = flexc::Error<RedisError>;

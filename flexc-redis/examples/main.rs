@@ -1,11 +1,10 @@
-// use async_std::task;
 use flexc_redis::{Pool, RedisConnectionManager};
 use redis::AsyncCommands;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::task;
 
-const TEST_KEY: &'static str = "mobc::redis::test";
+const TEST_KEY: &'static str = "flexc::redis::test";
 const REDIS_URL: &str = "redis://127.0.0.1:6379/";
 
 #[tokio::main]
