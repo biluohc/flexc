@@ -1,11 +1,11 @@
-use crate::{async_trait, Manager};
+use flexc::{async_trait, Manager};
 use redis::aio::Connection;
 use redis::{Client, ErrorKind, RedisError};
 use std::sync::atomic::*;
 
-pub type Pool = crate::Pool<RedisConnectionManager>;
-pub type PooledConnection = crate::PooledConnection<RedisConnectionManager>;
-pub type Error = crate::Error<RedisError>;
+pub type Pool = flexc::Pool<RedisConnectionManager>;
+pub type PooledConnection = flexc::PooledConnection<RedisConnectionManager>;
+pub type Error = flexc::Error<RedisError>;
 
 pub struct RedisConnectionManager {
     client: Client,
@@ -13,7 +13,11 @@ pub struct RedisConnectionManager {
 }
 
 impl RedisConnectionManager {
-    pub fn new(client: Client) -> Self {
+    pub fn new(url: &str) -> Result<Self, RedisError> {
+        let client = Client::open(url)?;
+        Ok(Self::with_client(client))
+    }
+    pub fn with_client(client: Client) -> Self {
         Self {
             client,
             counter: AtomicUsize::new(0),

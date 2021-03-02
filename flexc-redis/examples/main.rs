@@ -1,7 +1,5 @@
-extern crate flexc;
-
 // use async_std::task;
-use flexc::redis::{Pool, RedisConnectionManager};
+use flexc_redis::{Pool, RedisConnectionManager};
 use redis::AsyncCommands;
 use std::sync::Arc;
 use std::time::Instant;
@@ -12,8 +10,7 @@ const REDIS_URL: &str = "redis://127.0.0.1:6379/";
 
 #[tokio::main]
 async fn main() {
-    let client = redis::Client::open(REDIS_URL).unwrap();
-    let manager = RedisConnectionManager::new(client);
+    let manager = RedisConnectionManager::new(REDIS_URL).unwrap();
     let pool = Arc::new(Pool::builder().maxsize(20).build(manager));
     println!("state: {:?}", pool.state());
 
