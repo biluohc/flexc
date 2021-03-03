@@ -41,6 +41,7 @@ impl Status {
                 invalid => unreachable!("conn-{} invalid status: {}", idx, invalid),
             }
         }
+        state.size = state.inuse + state.idle;
         state.wait = Arc::weak_count(&self.0) as _;
 
         state
@@ -55,11 +56,12 @@ pub struct State {
 
     // Pool Status
     /// The number of established connections both in use and idle.
-    pub connections: u32,
+    pub size: u32,
     /// The number of connections currently in use.
     pub inuse: u32,
-    /// The total number of connections waited for.
-    pub wait: u32,
     /// The number of idle connections.
     pub idle: u32,
+
+    /// The total number of connections waited for.
+    pub wait: u32,
 }
