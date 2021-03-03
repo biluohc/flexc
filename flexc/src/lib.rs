@@ -32,10 +32,17 @@ impl<M: Manager> Pool<M> {
     }
 
     pub async fn get(&self) -> Result<PooledConnection<M>, Error<M::Error>> {
+        self.get_timeout(self.shared.cfg.timeout).await
+    }
+
+    pub async fn get_timeout(
+        &self,
+        duration: Option<Duration>,
+    ) -> Result<PooledConnection<M>, Error<M::Error>> {
         let _wait = Arc::downgrade(&self.shared.status.0);
         let mut error = "wait";
 
-        if let Some(timeout) = self.shared.cfg.timeout {
+        if let Some(timeout) = duration {
             match time::timeout(timeout, self.get_inner(&mut error)).await {
                 Ok(res) => res,
                 Err(_) => Err(Error::Timeout(error)),
@@ -74,7 +81,7 @@ impl<M: Manager> Pool<M> {
                 conn.con = Some(con);
             }
 
-            // todo: incheck should drop _wait?
+            // todo: should drop _wait while check?
             if let Some(check) = self.shared.cfg.check {
                 if check == Duration::from_secs(0)
                     || self.shared.clock.elapsed() >= (conn.time + check)
