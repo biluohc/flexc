@@ -13,5 +13,5 @@ mpmc = { package = "crossbeam-channel", version = "0.5.0" }
 num_cpus = "1.13.0"
 
 [dependencies]
-flexc = { path = "../" }
+flexc = { path = "../flexc" }
 redis = { version = "0.17", default-features = false, features = [ "tokio-comp" ] }
