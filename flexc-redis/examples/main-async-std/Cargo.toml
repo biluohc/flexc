@@ -1,0 +1,14 @@
+[package]
+name = "main-async-std"
+version = "0.1.0"
+authors = ["Wspsxing <biluohc@qq.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+
+[dependencies]
+async-channel = "1.6"
+flexc-redis = { path = "../../", default-features = false, features = [ "async-rt" ] }
+redis = { version = "0.17", default-features = false, features = [ "async-std-comp" ] }
+async-std = { version = "1.7", features = [ "attributes" ] }

@@ -2,17 +2,14 @@ use crossbeam_queue::ArrayQueue;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-#[cfg(any(feature = "tokio-rt"))]
-use tokio::{
-    sync::{OwnedSemaphorePermit, Semaphore},
-    time,
-};
+use compat::{timeout, OwnedSemaphorePermit, Semaphore, SemaphoreWrap};
 
 pub use async_trait::async_trait;
 pub use error::Error;
 pub use status::State;
 use status::Status;
 
+mod compat;
 mod error;
 mod status;
 
@@ -45,8 +42,8 @@ impl<M: Manager> Pool<M> {
         let _wait = Arc::downgrade(&self.shared.status.0);
         let mut error = "wait";
 
-        if let Some(timeout) = duration {
-            match time::timeout(timeout, self.get_inner(&mut error)).await {
+        if let Some(duration) = duration {
+            match timeout(duration, self.get_inner(&mut error)).await {
                 Ok(res) => res,
                 Err(_) => Err(Error::Timeout(error)),
             }
@@ -64,19 +61,24 @@ impl<M: Manager> Pool<M> {
         loop {
             let permit = if try_once_time {
                 try_once_time = false;
-                match self.shared.semaphore.clone().try_acquire_owned() {
-                    Ok(p) => p,
-                    Err(_) => continue,
+                match self.shared.semaphore.wrapped_try_acquire_owned() {
+                    Ok(Some(p)) => p,
+                    Ok(None) => continue,
+                    Err(_) => return Err(Error::Closed),
                 }
             } else {
-                self.shared.semaphore.clone().acquire_owned().await
+                self.shared
+                    .semaphore
+                    .wrapped_acquire_owned()
+                    .await
+                    .map_err(|_| Error::Closed)?
             };
             let conn = self.shared.queue.pop();
             if conn.is_none() {
                 continue;
             }
 
-            let mut conn = conn.unwrap();
+            let mut conn = conn.expect("got");
             conn.permit = Some(permit);
             if conn.is_empty() {
                 *error = "connect";
@@ -168,7 +170,7 @@ pub(crate) struct SharedPool<M: Manager> {
 
 impl<M: Manager> SharedPool<M> {
     pub(crate) fn new(cfg: Builder, manager: M) -> Self {
-        let semaphore = Arc::new(Semaphore::new(cfg.maxsize));
+        let semaphore = Semaphore::wrapped_new(cfg.maxsize);
         let queue = ArrayQueue::new(cfg.maxsize);
         let status = Status::new(cfg.maxsize);
         Self {
