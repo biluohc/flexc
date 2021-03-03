@@ -3,7 +3,10 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 #[cfg(any(feature = "tokio-rt"))]
-use tokio::{sync::Semaphore, time};
+use tokio::{
+    sync::{OwnedSemaphorePermit, Semaphore},
+    time,
+};
 
 pub use async_trait::async_trait;
 pub use error::Error;
@@ -61,20 +64,20 @@ impl<M: Manager> Pool<M> {
         loop {
             let permit = if try_once_time {
                 try_once_time = false;
-                match self.shared.semaphore.try_acquire() {
+                match self.shared.semaphore.clone().try_acquire_owned() {
                     Ok(p) => p,
                     Err(_) => continue,
                 }
             } else {
-                self.shared.semaphore.acquire().await
+                self.shared.semaphore.clone().acquire_owned().await
             };
             let conn = self.shared.queue.pop();
-            permit.forget();
             if conn.is_none() {
                 continue;
             }
 
             let mut conn = conn.unwrap();
+            conn.permit = Some(permit);
             if conn.is_empty() {
                 *error = "connect";
                 let con = self.shared.manager.connect().await?;
@@ -157,7 +160,7 @@ impl Builder {
 pub(crate) struct SharedPool<M: Manager> {
     cfg: Builder,
     manager: M,
-    semaphore: Semaphore,
+    semaphore: Arc<Semaphore>,
     queue: ArrayQueue<Conn<M>>,
     status: Status,
     clock: Instant,
@@ -165,7 +168,7 @@ pub(crate) struct SharedPool<M: Manager> {
 
 impl<M: Manager> SharedPool<M> {
     pub(crate) fn new(cfg: Builder, manager: M) -> Self {
-        let semaphore = Semaphore::new(cfg.maxsize);
+        let semaphore = Arc::new(Semaphore::new(cfg.maxsize));
         let queue = ArrayQueue::new(cfg.maxsize);
         let status = Status::new(cfg.maxsize);
         Self {
@@ -205,6 +208,7 @@ pub(crate) struct Conn<M: Manager> {
     status: Status,
     shared: Weak<SharedPool<M>>,
     con: Option<M::Connection>,
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 impl<M: Manager> Conn<M> {
@@ -215,6 +219,7 @@ impl<M: Manager> Conn<M> {
             status: shared.status.clone(),
             time: Duration::from_secs(0),
             con: None,
+            permit: None,
         }
     }
     pub(crate) fn is_empty(&self) -> bool {
@@ -260,7 +265,7 @@ impl<M: Manager> std::ops::DerefMut for PooledConnection<M> {
 
 impl<M: Manager> Drop for PooledConnection<M> {
     fn drop(&mut self) {
-        let conn = self.0.take().unwrap();
+        let mut conn = self.0.take().unwrap();
         if conn.is_empty() {
             conn.status.set_empty(conn.idx);
         } else {
@@ -269,8 +274,8 @@ impl<M: Manager> Drop for PooledConnection<M> {
 
         // the pool not dropped
         if let Some(p) = conn.shared.upgrade() {
+            conn.permit.take();
             p.queue.push(conn).ok();
-            p.semaphore.add_permits(1);
         }
     }
 }

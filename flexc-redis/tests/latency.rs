@@ -76,6 +76,7 @@ fn redis_pool_lantency() {
         }
 
         let count = counter.count() - 1;
+        println!("count: {}", count);
         for (i, c) in mss
             .iter()
             .enumerate()
