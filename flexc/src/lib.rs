@@ -80,28 +80,45 @@ impl<M: Manager> Pool<M> {
 
             let mut conn = conn.expect("got");
             conn.permit = Some(permit);
-            if conn.is_empty() {
-                *error = "connect";
-                let con = self.shared.manager.connect().await?;
-                conn.con = Some(con);
-            }
 
-            // todo: should drop _wait while check?
-            if let Some(check) = self.shared.cfg.check {
-                if check == Duration::from_secs(0)
-                    || self.shared.clock.elapsed() >= (conn.time + check)
-                {
-                    *error = "check";
-                    self.shared
-                        .manager
-                        .check(conn.con.as_mut().unwrap())
-                        .await?;
-                    conn.time = self.shared.clock.elapsed();
+            return match self.fill_conn(error, &mut conn).await {
+                Ok(()) => Ok(PooledConnection::new(conn)),
+                Err(e) => {
+                    PooledConnection::recycle(conn);
+                    return Err(e);
                 }
-            }
-
-            return Ok(PooledConnection::new(conn));
+            };
         }
+    }
+
+    async fn fill_conn(
+        &self,
+        error: &mut &'static str,
+        conn: &mut Conn<M>,
+    ) -> Result<(), Error<M::Error>> {
+        let new = conn.is_empty();
+        if new {
+            *error = "connect";
+            let con = self.shared.manager.connect().await?;
+            conn.con = Some(con);
+        }
+
+        // todo: should drop _wait while check?
+        if let Some(check) = self.shared.cfg.check {
+            if new
+                || check == Duration::from_secs(0)
+                || self.shared.clock.elapsed() >= (conn.time + check)
+            {
+                *error = "check";
+                self.shared
+                    .manager
+                    .check(conn.con.as_mut().unwrap())
+                    .await?;
+                conn.time = self.shared.clock.elapsed();
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -120,7 +137,7 @@ impl Default for Builder {
         Self {
             maxsize: 20,
             timeout: Some(Duration::from_secs(5)),
-            check: Some(Duration::from_secs(10)),
+            check: Some(Duration::from_secs(0)),
         }
     }
 }
@@ -132,11 +149,11 @@ impl Builder {
         self
     }
     /*
-    none => never check
+    None => never check
 
-    0 => check every times
+    0 => check every time
 
-    >0 => check every time
+    >0 => check every duration
     */
     pub fn check(mut self, check_duration: Option<Duration>) -> Self {
         self.check = check_duration;
@@ -232,6 +249,11 @@ impl<M: Manager> Conn<M> {
 impl<M: Manager> PooledConnection<M> {
     pub(crate) fn new(conn: Conn<M>) -> Self {
         conn.status.set_inuse(conn.idx);
+        Self(Some(conn))
+    }
+    // recycle when connect/check error
+    pub(crate) fn recycle(conn: Conn<M>) -> Self {
+        conn.status.set_empty(conn.idx);
         Self(Some(conn))
     }
     /// Take this connection from the pool permanently.
