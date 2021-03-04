@@ -1,4 +1,5 @@
 use crossbeam_queue::ArrayQueue;
+use std::fmt;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
@@ -207,7 +208,7 @@ pub trait Manager: Send + Sync + 'static {
     /// The connection type this manager deals with.
     type Connection: Send + 'static;
     /// The error type returned by `Connection`s.
-    type Error: Send + Sync + 'static;
+    type Error: Send + 'static;
 
     /// Attempts to create a new connection.
     async fn connect(&self) -> Result<Self::Connection, Self::Error>;
@@ -219,6 +220,7 @@ pub trait Manager: Send + Sync + 'static {
     async fn check(&self, conn: &mut Self::Connection) -> Result<(), Self::Error>;
 }
 /// A smart pointer wrapping a connection.
+#[derive(Debug)]
 pub struct PooledConnection<M: Manager>(Option<Conn<M>>);
 
 pub(crate) struct Conn<M: Manager> {
@@ -228,6 +230,19 @@ pub(crate) struct Conn<M: Manager> {
     shared: Weak<SharedPool<M>>,
     con: Option<M::Connection>,
     permit: Option<OwnedSemaphorePermit>,
+}
+
+impl<M: Manager> fmt::Debug for Conn<M> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Conn")
+            .field("idx", &self.idx)
+            .field("time", &self.time)
+            .field("state", &self.status.0[self.idx])
+            .field("con", &self.con.as_ref().map(|_| ()))
+            .field("permit", &self.con.as_ref().map(|_| ()))
+            .field("shared", &"..")
+            .finish()
+    }
 }
 
 impl<M: Manager> Conn<M> {
