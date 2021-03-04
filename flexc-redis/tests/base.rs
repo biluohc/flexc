@@ -1,4 +1,4 @@
-use flexc_redis::{Builder, Pool, RedisConnectionManager};
+use flexc_redis::{flexc::Builder, Pool, RedisConnectionManager};
 use std::sync::{atomic::*, Arc};
 pub use std::time::*;
 pub use tokio::{
