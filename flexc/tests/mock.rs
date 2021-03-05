@@ -363,7 +363,7 @@ async fn test_bad_check() {
     assert_eq!(okc, GETS - bad_end + bad_start);
     assert_eq!(errc, bad_end - bad_start);
 
-    cons.clear();
+    cons.drain(..).into_iter().map(|c| c.take()).count();
     for _ in 0..MAX_SIZE {
         cons.push(pool.get().await.unwrap());
     }

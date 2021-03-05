@@ -2,6 +2,7 @@ include!("base.rs");
 
 const REDIS_URL: &str = "redis://127.0.0.1:6379/";
 const KEY: &str = "set-lantency";
+const TIME: Duration = Duration::from_secs(60);
 
 // while true; do sleep 1&& redis-cli info stats|grep per_sec; done
 // cargo test --manifest-path flexc-redis/Cargo.toml --release -- --test-threads=1 --nocapture redis_pool_lantency
@@ -14,14 +15,17 @@ fn redis_pool_lantency() {
             .maxsize(7)
             .timeout(Some(Duration::from_secs(1)));
         let pool = get_redis_pool(REDIS_URL, builder).await;
+
         let counter = Counter::new();
-        let time = Duration::from_secs(60);
+        let counter_get_failed = Counter::new();
+
         let (mp, mc) = mpmc::unbounded();
+
         for idx in 0..num_cpus::get() * num_cpus::get() * 3 {
             let mp = mp.clone();
             let cc = counter.clone();
+            let cget = counter_get_failed.clone();
             let pool = pool.clone();
-            let time = time.clone();
 
             spawn(async move {
                 let set = KEY;
@@ -31,8 +35,16 @@ fn redis_pool_lantency() {
                 }
                 let now = Instant::now();
 
-                while now.elapsed() < time {
-                    let mut con = pool.get().await.expect("get conn");
+                while now.elapsed() < TIME {
+                    let mut con = match pool.get().await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            println!("get conn failed: {}", e);
+                            cget.counter();
+                            continue;
+                        }
+                    };
+
                     if now.elapsed().as_micros() % 1000 == 0 {
                         let mut pl = redis::Pipeline::new();
                         pl.cmd("sadd")
@@ -57,7 +69,6 @@ fn redis_pool_lantency() {
                     }
                     cc.counter();
                 }
-                // println!("redisc-bench-{} exit", idx);
             });
         }
 
@@ -87,10 +98,11 @@ fn redis_pool_lantency() {
         }
 
         println!(
-            "costed: {:?}, count: {}, ops: {}",
-            time,
+            "costed: {:?}, get_connection_failed: {}, count: {}, ops: {}",
+            TIME,
+            counter_get_failed.count(),
             count,
-            count / time.as_secs() as usize
+            count / TIME.as_secs() as usize
         );
     })
 }

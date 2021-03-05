@@ -2,6 +2,7 @@ include!("base.rs");
 
 const REDIS_URL: &str = "redis://127.0.0.1:6379/";
 const KEY: &str = "set-bench";
+const TIME: Duration = Duration::from_secs(60);
 
 // while true; do sleep 1&& redis-cli info stats|grep per_sec; done
 // cargo test --manifest-path flexc-redis/Cargo.toml --release -- --test-threads=1 --nocapture redis_pool_bench
@@ -14,13 +15,14 @@ fn redis_pool_bench() {
             .maxsize(7)
             .timeout(Some(Duration::from_secs(1)));
         let pool = get_redis_pool(REDIS_URL, builder).await;
+
         let counter = Counter::new();
-        let time = Duration::from_secs(60);
+        let counter_get_failed = Counter::new();
 
         for idx in 0..num_cpus::get() * num_cpus::get() * 3 {
             let pool = pool.clone();
             let cc = counter.clone();
-            let time = time.clone();
+            let cget = counter_get_failed.clone();
 
             spawn(async move {
                 let set = KEY;
@@ -30,8 +32,15 @@ fn redis_pool_bench() {
                 }
                 let now = Instant::now();
 
-                while now.elapsed() < time {
-                    let mut con = pool.get().await.expect("get conn");
+                while now.elapsed() < TIME {
+                    let mut con = match pool.get().await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            println!("get conn failed: {}", e);
+                            cget.counter();
+                            continue;
+                        }
+                    };
                     if now.elapsed().as_micros() % 1000 == 0 {
                         let mut pl = redis::Pipeline::new();
                         pl.cmd("sadd")
@@ -57,14 +66,15 @@ fn redis_pool_bench() {
         }
 
         counter.counter();
-        sleep(time.clone() + Duration::from_secs(1)).await;
+        sleep(TIME.clone() + Duration::from_secs(1)).await;
         let count = counter.count() - 1;
 
         println!(
-            "costed: {:?}, count: {}, ops: {}",
-            time,
+            "costed: {:?}, get_connection_failed: {}, count: {}, ops: {}",
+            TIME,
+            counter_get_failed.count(),
             count,
-            count / time.as_secs() as usize
+            count / TIME.as_secs() as usize
         );
     })
 }
