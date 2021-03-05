@@ -40,10 +40,63 @@ impl<M: Manager> Pool<M> {
         &self.shared.cfg
     }
 
+    /// get without waiting idle connection, default timeout is for connect and check
+    pub async fn try_get(&self) -> Result<Option<PooledConnection<M>>, Error<M::Error>> {
+        self.try_get_timeout(self.config().timeout).await
+    }
+
+    /// get without waiting idle connection, custom timeout is for connect and check
+    pub async fn try_get_timeout(
+        &self,
+        duration: Option<Duration>,
+    ) -> Result<Option<PooledConnection<M>>, Error<M::Error>> {
+        let _wait = Arc::downgrade(&self.shared.status.0);
+        let mut error = "wait";
+
+        let permit = match self.shared.semaphore.wrapped_try_acquire_owned() {
+            Ok(Some(p)) => p,
+            Ok(None) => return Ok(None),
+            Err(_) => return Err(Error::Closed),
+        };
+
+        let conn = self.shared.queue.pop();
+        if conn.is_none() {
+            return Ok(None);
+        }
+
+        let fut = async move {
+            let mut conn = PooledConnection(conn);
+            let con = conn.0.as_mut().expect("try get");
+            con.permit = Some(permit);
+
+            match self.fill_conn(&mut error, con).await {
+                Ok(()) => {
+                    con.inuse();
+                    Ok(Some(conn))
+                }
+                Err(e) => {
+                    con.recycle();
+                    Err(e)
+                }
+            }
+        };
+
+        if let Some(duration) = duration {
+            match timeout(duration, fut).await {
+                Ok(res) => res,
+                Err(_) => Err(Error::Timeout(error)),
+            }
+        } else {
+            fut.await
+        }
+    }
+
+    /// get with default timeout
     pub async fn get(&self) -> Result<PooledConnection<M>, Error<M::Error>> {
         self.get_timeout(self.config().timeout).await
     }
 
+    /// get with custom timeout
     pub async fn get_timeout(
         &self,
         duration: Option<Duration>,
@@ -82,19 +135,24 @@ impl<M: Manager> Pool<M> {
                     .await
                     .map_err(|_| Error::Closed)?
             };
+
             let conn = self.shared.queue.pop();
             if conn.is_none() {
                 continue;
             }
 
-            let mut conn = conn.expect("got");
-            conn.permit = Some(permit);
+            let mut conn = PooledConnection(conn);
+            let con = conn.0.as_mut().expect("get");
+            con.permit = Some(permit);
 
-            return match self.fill_conn(error, &mut conn).await {
-                Ok(()) => Ok(PooledConnection::new(conn)),
+            return match self.fill_conn(error, con).await {
+                Ok(()) => {
+                    con.inuse();
+                    Ok(conn)
+                }
                 Err(e) => {
-                    PooledConnection::recycle(conn);
-                    return Err(e);
+                    con.recycle();
+                    Err(e)
                 }
             };
         }
@@ -264,18 +322,17 @@ impl<M: Manager> Conn<M> {
     pub(crate) fn is_empty(&self) -> bool {
         self.con.is_none()
     }
+    pub(crate) fn inuse(&mut self) {
+        self.status.set_inuse(self.idx);
+    }
+    // recycle when connect/check error
+    pub(crate) fn recycle(&mut self) {
+        self.con.take();
+        self.status.set_empty(self.idx);
+    }
 }
 
 impl<M: Manager> PooledConnection<M> {
-    pub(crate) fn new(conn: Conn<M>) -> Self {
-        conn.status.set_inuse(conn.idx);
-        Self(Some(conn))
-    }
-    // recycle when connect/check error
-    pub(crate) fn recycle(conn: Conn<M>) -> Self {
-        conn.status.set_empty(conn.idx);
-        Self(Some(conn))
-    }
     /// Take this connection from the pool permanently.
     pub fn take(mut self) -> M::Connection {
         self.0.as_mut().unwrap().con.take().unwrap()

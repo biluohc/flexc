@@ -176,7 +176,7 @@ async fn test_move_drop() {
     // fetch the only conect from the pool
     let con = pool.get().await.unwrap();
     let con2 = pool.get().await.unwrap();
-    let con3 = pool.get().await.unwrap();
+    let con3 = pool.try_get().await.unwrap().unwrap();
 
     yield_now().await;
 
@@ -374,4 +374,5 @@ async fn test_bad_check() {
     assert_eq!(state.inuse, MAX_SIZE);
     assert_eq!(state.idle, 0);
     assert!(pool.get().await.unwrap_err().is_timeout());
+    assert!(pool.try_get().await.unwrap().is_none());
 }

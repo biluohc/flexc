@@ -35,13 +35,14 @@ impl Status {
         for (idx, s) in self.0.as_slice().iter().enumerate() {
             let s = s.load(Ordering::Relaxed);
             match s {
-                STATUS_EMPTY => {}
+                STATUS_EMPTY => state.empty += 1,
                 STATUS_INUSE => state.inuse += 1,
                 STATUS_IDLE => state.idle += 1,
                 invalid => unreachable!("conn-{} invalid status: {}", idx, invalid),
             }
         }
         state.size = state.inuse + state.idle;
+        state.maxsize = state.size + state.empty;
         state.wait = Arc::weak_count(&self.0) as _;
 
         state
@@ -53,15 +54,17 @@ impl Status {
 pub struct State {
     /// Maximum number of open connections to the database
     pub maxsize: u32,
+    /// Number of unconnected
+    pub empty: u32,
 
     // Pool Status
-    /// The number of established connections both in use and idle.
+    /// The number of established connections both in use and idle
     pub size: u32,
-    /// The number of connections currently in use.
+    /// The number of connections currently in use
     pub inuse: u32,
-    /// The number of idle connections.
+    /// The number of idle connections
     pub idle: u32,
 
-    /// The total number of connections waited for.
+    /// The total number of connections waited for
     pub wait: u32,
 }
