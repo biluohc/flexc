@@ -206,6 +206,15 @@ async fn test_concurrent() {
             .build(manager.clone()),
     );
 
+    // Init
+    pool.start_connections().await.unwrap();
+    let status = pool.state();
+    assert_eq!(status.inuse, 0);
+    assert_eq!(status.size, MAX_SIZE);
+    assert_eq!(status.idle, MAX_SIZE);
+    assert_eq!(status.maxsize, MAX_SIZE);
+    assert_eq!(manager.size(), MAX_SIZE as _);
+
     // Spawn tasks
     let futures = (0..TASKS)
         .map(|_| {
@@ -253,7 +262,7 @@ async fn test_concurrent() {
             .iter()
             .map(|c| c.as_ref().checked_times)
             .sum::<usize>(),
-        TASKS + values.len()
+        TASKS + values.len() * 2
     );
 
     let now = manager.clock.elapsed();

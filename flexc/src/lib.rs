@@ -40,6 +40,15 @@ impl<M: Manager> Pool<M> {
         &self.shared.cfg
     }
 
+    /// start max-size connections
+    pub async fn start_connections(&self) -> Result<(), Error<M::Error>> {
+        for _idx in 0..self.config().maxsize {
+            let _con = self.get().await?;
+            // println!("get {}: con-{}", _idx, _con.0.as_ref().unwrap().idx);
+        }
+        Ok(())
+    }
+
     /// get without waiting idle connection, default timeout is for connect and check
     pub async fn try_get(&self) -> Result<Option<PooledConnection<M>>, Error<M::Error>> {
         self.try_get_timeout(self.config().timeout).await
