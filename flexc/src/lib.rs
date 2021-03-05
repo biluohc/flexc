@@ -32,8 +32,16 @@ impl<M: Manager> Pool<M> {
         self.shared.status.state()
     }
 
+    pub fn manager(&self) -> &M {
+        &self.shared.manager
+    }
+
+    pub fn config(&self) -> &Builder {
+        &self.shared.cfg
+    }
+
     pub async fn get(&self) -> Result<PooledConnection<M>, Error<M::Error>> {
-        self.get_timeout(self.shared.cfg.timeout).await
+        self.get_timeout(self.config().timeout).await
     }
 
     pub async fn get_timeout(
@@ -100,21 +108,18 @@ impl<M: Manager> Pool<M> {
         let new = conn.is_empty();
         if new {
             *error = "connect";
-            let con = self.shared.manager.connect().await?;
+            let con = self.manager().connect().await?;
             conn.con = Some(con);
         }
 
         // todo: should drop _wait while check?
-        if let Some(check) = self.shared.cfg.check {
+        if let Some(check) = self.config().check {
             if new
                 || check == Duration::from_secs(0)
                 || self.shared.clock.elapsed() >= (conn.time + check)
             {
                 *error = "check";
-                self.shared
-                    .manager
-                    .check(conn.con.as_mut().unwrap())
-                    .await?;
+                self.manager().check(conn.con.as_mut().unwrap()).await?;
                 conn.time = self.shared.clock.elapsed();
             }
         }
