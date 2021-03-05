@@ -1,11 +1,6 @@
 use flexc_redis::{flexc::Builder, Pool, RedisConnectionManager};
 use std::sync::{atomic::*, Arc};
 pub use std::time::*;
-pub use tokio::{
-    runtime::{self, Runtime},
-    task::spawn,
-    time::delay_for as sleep,
-};
 #[derive(Debug, Clone)]
 pub struct Counter(Arc<AtomicUsize>);
 
@@ -28,20 +23,25 @@ async fn get_redis_pool(url: &str, builder: Builder) -> Arc<Pool> {
     Arc::new(builder.build(manager))
 }
 
-#[allow(dead_code)]
-fn tokio_rt(cpus: usize) -> Runtime {
-    if cpus == 0 {
-        runtime::Builder::new()
-            .enable_all()
-            .basic_scheduler()
-            .build()
-            .unwrap()
-    } else {
-        runtime::Builder::new()
-            .enable_all()
-            .threaded_scheduler()
-            .core_threads(cpus)
-            .build()
-            .unwrap()
-    }
+#[cfg(any(feature = "tokio-rt", feature = "tokio-rt-tls"))]
+pub use tokio::{runtime, task::spawn, time::delay_for as sleep};
+
+#[cfg(any(feature = "tokio-rt", feature = "tokio-rt-tls"))]
+pub fn block_on(fut: impl std::future::Future<Output = ()>) {
+    let mut rt = runtime::Builder::new()
+        .enable_all()
+        .threaded_scheduler()
+        .build()
+        .unwrap();
+    rt.block_on(async { assert!(std::env::args().count() >= 1) });
+    rt.block_on(fut)
+}
+
+#[cfg(any(feature = "async-rt", feature = "async-rt-tls"))]
+pub use async_std::task::{block_on as block_on_, sleep, spawn};
+
+#[cfg(any(feature = "async-rt", feature = "async-rt-tls"))]
+pub fn block_on(fut: impl std::future::Future<Output = ()>) {
+    block_on_(async { assert!(std::env::args().count() >= 1) });
+    block_on_(fut)
 }

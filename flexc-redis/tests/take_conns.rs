@@ -4,11 +4,10 @@ const REDIS_URL: &str = "redis://127.0.0.1:6379/";
 const KEY: &str = "set-take-idxs";
 
 // cargo test --manifest-path flexc-redis/Cargo.toml --release -- --test-threads=1 --nocapture redis_pool_take_conns
+// cargo test --no-default-features --features async-rt --manifest-path flexc-redis/Cargo.toml --release -- --test-threads=1 --nocapture redis_pool_take_conns
 #[test]
 fn redis_pool_take_conns() {
-    let mut rt = tokio_rt(num_cpus::get() * 3);
-
-    rt.block_on(async {
+    block_on(async {
         let builder = Builder::default()
             .maxsize(7)
             .timeout(Some(Duration::from_secs(1)));

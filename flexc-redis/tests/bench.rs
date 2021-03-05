@@ -6,11 +6,10 @@ const TIME: Duration = Duration::from_secs(60);
 
 // while true; do sleep 1&& redis-cli info stats|grep per_sec; done
 // cargo test --manifest-path flexc-redis/Cargo.toml --release -- --test-threads=1 --nocapture redis_pool_bench
+// cargo test --no-default-features --features async-rt --manifest-path flexc-redis/Cargo.toml --release -- --test-threads=1 --nocapture redis_pool_bench
 #[test]
 fn redis_pool_bench() {
-    let mut rt = tokio_rt(num_cpus::get() * 5);
-
-    rt.block_on(async {
+    block_on(async {
         let builder = Builder::default()
             .maxsize(7)
             .timeout(Some(Duration::from_secs(1)));
