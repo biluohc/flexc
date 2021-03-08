@@ -120,7 +120,7 @@ async fn test_basic() {
         .maxsize(16)
         .timeout(duration)
         .check(duration)
-        .build(manager.clone());
+        .build_unchecked(manager.clone());
 
     let status = pool.state();
     assert_eq!(status.size, 0);
@@ -171,7 +171,7 @@ async fn test_move_drop() {
         .maxsize(16)
         .timeout(duration)
         .check(duration)
-        .build(MockManager::new());
+        .build_unchecked(MockManager::new());
 
     // fetch the only conect from the pool
     let con = pool.get().await.unwrap();
@@ -203,7 +203,7 @@ async fn test_concurrent() {
         Pool::builder()
             .maxsize(MAX_SIZE as _)
             .timeout(duration)
-            .build(manager.clone()),
+            .build_unchecked(manager.clone()),
     );
 
     // Init
@@ -306,7 +306,9 @@ async fn take(maxsize: usize, takes: usize) {
     let pool = Pool::builder()
         .maxsize(maxsize)
         .timeout(Some(Duration::from_millis(100)))
-        .build(MockManager::new());
+        .build(MockManager::new())
+        .await
+        .unwrap();
 
     let mut connections = Vec::new();
 
@@ -347,7 +349,7 @@ async fn test_bad_check() {
     let pool = Pool::builder()
         .maxsize(MAX_SIZE as _)
         .timeout(duration)
-        .build(manager.clone());
+        .build_unchecked(manager.clone());
 
     let mut errc = 0usize;
     let mut okc = 0usize;

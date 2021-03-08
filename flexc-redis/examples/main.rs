@@ -10,7 +10,7 @@ const REDIS_URL: &str = "redis://127.0.0.1:6379/";
 #[tokio::main]
 async fn main() {
     let manager = RedisConnectionManager::new(REDIS_URL).unwrap();
-    let pool = Arc::new(Pool::builder().maxsize(20).build(manager));
+    let pool = Arc::new(Pool::builder().maxsize(20).build(manager).await.unwrap());
     println!("state: {:?}", pool.state());
 
     let mut conn = pool.get().await.unwrap();

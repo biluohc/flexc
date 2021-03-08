@@ -20,7 +20,7 @@ impl Counter {
 #[allow(dead_code)]
 async fn get_redis_pool(url: &str, builder: Builder) -> Arc<Pool> {
     let manager = RedisConnectionManager::new(url).unwrap();
-    Arc::new(builder.build(manager))
+    Arc::new(builder.build(manager).await.unwrap())
 }
 
 #[cfg(any(feature = "tokio-rt", feature = "tokio-rt-tls"))]

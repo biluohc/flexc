@@ -19,11 +19,6 @@ pub struct Pool<M: Manager> {
 }
 
 impl<M: Manager> Pool<M> {
-    pub fn new(manager: M) -> Self {
-        let cfg = Self::builder();
-        cfg.build(manager)
-    }
-
     pub fn builder() -> Builder {
         Builder::default()
     }
@@ -41,12 +36,22 @@ impl<M: Manager> Pool<M> {
     }
 
     /// start max-size connections
-    pub async fn start_connections(&self) -> Result<(), Error<M::Error>> {
+    pub async fn start_connections(&self) -> Result<usize, Error<M::Error>> {
+        use futures_util::{stream::futures_unordered::FuturesUnordered, StreamExt};
+
+        let mut futs = FuturesUnordered::new();
         for _idx in 0..self.config().maxsize {
-            let _con = self.get().await?;
-            // println!("get {}: con-{}", _idx, _con.0.as_ref().unwrap().idx);
+            futs.push(Box::pin(self.get()));
         }
-        Ok(())
+
+        let mut count = 0;
+        while let Some(res) = futs.next().await {
+            let _conn = res?;
+            count += 1;
+            // println!("get {}: con-{}", _idx, _conn.0.as_ref().unwrap().idx);
+        }
+
+        Ok(count)
     }
 
     /// get without waiting idle connection, default timeout is for connect and check
@@ -221,13 +226,12 @@ impl Builder {
         self.maxsize = maxsize;
         self
     }
-    /*
-    None => never check
-
-    0 => check every time
-
-    >0 => check every duration
-    */
+    /// `None` => never check
+    ///
+    /// `0` => check every time
+    ///
+    /// `>0` => check every duration
+    ///
     pub fn check(mut self, check_duration: Option<Duration>) -> Self {
         self.check = check_duration;
         self
@@ -237,7 +241,9 @@ impl Builder {
         self.timeout = timeout;
         self
     }
-    pub fn build<M: Manager>(self, manager: M) -> Pool<M> {
+
+    /// Consumes the builder, returning a new Pool
+    pub fn build_unchecked<M: Manager>(self, manager: M) -> Pool<M> {
         let shared = Arc::new(SharedPool::new(self, manager));
 
         for idx in 0..shared.cfg.maxsize {
@@ -246,6 +252,13 @@ impl Builder {
         }
 
         Pool { shared }
+    }
+
+    /// build_unchecked and start max-size connections
+    pub async fn build<M: Manager>(self, manager: M) -> Result<Pool<M>, Error<M::Error>> {
+        let this = Self::build_unchecked(self, manager);
+        this.start_connections().await?;
+        Ok(this)
     }
 }
 
