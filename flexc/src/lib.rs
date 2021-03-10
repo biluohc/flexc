@@ -191,6 +191,7 @@ impl<M: Manager> Pool<M> {
                 || self.shared.clock.elapsed() >= (conn.time + check)
             {
                 *error = "check";
+                conn.incheck();
                 self.manager().check(conn.con.as_mut().unwrap()).await?;
                 conn.time = self.shared.clock.elapsed();
             }
@@ -344,6 +345,12 @@ impl<M: Manager> Conn<M> {
     pub(crate) fn is_empty(&self) -> bool {
         self.con.is_none()
     }
+    pub(crate) fn is_incheck(&self) -> bool {
+        self.status.is_incheck(self.idx)
+    }
+    pub(crate) fn incheck(&mut self) {
+        self.status.set_incheck(self.idx);
+    }
     pub(crate) fn inuse(&mut self) {
         self.status.set_inuse(self.idx);
     }
@@ -389,6 +396,12 @@ impl<M: Manager> std::ops::DerefMut for PooledConnection<M> {
 impl<M: Manager> Drop for PooledConnection<M> {
     fn drop(&mut self) {
         let mut conn = self.0.take().unwrap();
+
+        if conn.is_incheck() {
+            //  check failed when get-xxx timeout(inner future dropped, recycle not run), should giveup the connection
+            conn.con.take();
+        }
+
         if conn.is_empty() {
             conn.status.set_empty(conn.idx);
         } else {
