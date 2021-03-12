@@ -38,4 +38,5 @@ async fn main() {
     println!("state: {:?}, cost: {:?}", pool.state(), now.elapsed());
     conn.take();
     println!("state: {:?}, cost: {:?}", pool.state(), now.elapsed());
+    println!("state: {}, cost: {:?}", serde_json::to_string(&pool.state()).unwrap(), now.elapsed());
 }

@@ -59,6 +59,7 @@ impl Status {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Default, Clone, Debug, PartialEq, PartialOrd)]
 /// Information about the state of a `Pool`.
 pub struct State {

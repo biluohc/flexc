@@ -14,6 +14,7 @@ async-std = { version = "1.6", features = [ "attributes" ] }
 mpmc = { package = "crossbeam-channel", version = "0.5.0" }
 
 [features]
+serde = [ "flexc/serde" ]
 default = [ "tokio-rt" ]
 tokio-rt = [ "flexc/tokio-rt", "redis/tokio-comp" ]
 async-rt = [ "flexc/async-rt", "redis/async-std-comp" ]
