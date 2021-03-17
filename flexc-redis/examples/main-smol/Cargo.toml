@@ -10,6 +10,6 @@ edition = "2018"
 [dependencies]
 async-channel = "1.6"
 flexc-redis = { path = "../../", default-features = false, features = [ "async-rt", "serde" ] }
-redis = { version = "0.17", default-features = false, features = [ "async-std-comp" ] }
+redis = { version = "0.20", default-features = false, features = [ "async-std-comp" ] }
 smol = "1.2.5"
 serde_json = "1"

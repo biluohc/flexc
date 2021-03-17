@@ -202,7 +202,9 @@ impl<M: Manager> Pool<M> {
 }
 
 impl<M: Manager> Drop for Pool<M> {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        self.shared.semaphore.close();
+    }
 }
 #[derive(Clone, Debug)]
 pub struct Builder {

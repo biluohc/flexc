@@ -24,13 +24,19 @@ async fn get_redis_pool(url: &str, builder: Builder) -> Arc<Pool> {
 }
 
 #[cfg(any(feature = "tokio-rt", feature = "tokio-rt-tls"))]
-pub use tokio::{runtime, task::spawn, time::delay_for as sleep};
+pub use tokio::{runtime, task::spawn, time::sleep};
 
 #[cfg(any(feature = "tokio-rt", feature = "tokio-rt-tls"))]
 pub fn block_on(fut: impl std::future::Future<Output = ()>) {
-    let mut rt = runtime::Builder::new()
+    let rt = runtime::Builder::new_multi_thread()
         .enable_all()
-        .threaded_scheduler()
+        .thread_name_fn(|| {
+            use std::sync::atomic::*;
+
+            static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
+            let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
+            format!("tok-{}", id)
+        })
         .build()
         .unwrap();
     rt.block_on(async { assert!(std::env::args().count() >= 1) });

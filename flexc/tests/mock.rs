@@ -8,7 +8,7 @@ use std::{
 use tokio::{
     task::{spawn, yield_now},
     test as atest,
-    time::delay_for as sleep,
+    time::sleep,
 };
 
 // cargo test --no-default-features --features async-rt  --manifest-path flexc/Cargo.toml --release -- --test-threads=1 --nocapture

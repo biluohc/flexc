@@ -1,6 +1,6 @@
 [package]
 name = "flexc-redis"
-version = "0.2.0"
+version = "0.4.0"
 authors = ["Wspsxing <biluohc@qq.com>"]
 edition = "2018"
 
@@ -9,7 +9,7 @@ edition = "2018"
 futures = "0.3"
 num_cpus = "1.13.0"
 async-channel = "1.6"
-tokio = { version = "0.2", features = [ "full" ] }
+tokio = { version = "1.0", features = [ "full" ] }
 async-std = { version = "1.6", features = [ "attributes" ] }
 mpmc = { package = "crossbeam-channel", version = "0.5.0" }
 
@@ -18,9 +18,9 @@ serde = [ "flexc/serde" ]
 default = [ "tokio-rt" ]
 tokio-rt = [ "flexc/tokio-rt", "redis/tokio-comp" ]
 async-rt = [ "flexc/async-rt", "redis/async-std-comp" ]
-tokio-rt-tls = [ "flexc/tokio-rt", "redis/tokio-tls-comp" ]
+tokio-rt-tls = [ "flexc/tokio-rt", "redis/tokio-native-tls-comp" ]
 async-rt-tls = [ "flexc/async-rt", "redis/async-std-tls-comp" ]
 
 [dependencies]
 flexc = { path = "../flexc", default-features = false }
-redis = { version = "0.17", default-features = false }
+redis = { version = "0.20", default-features = false }

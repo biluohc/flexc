@@ -6,6 +6,7 @@ pub(crate) trait SemaphoreWrap {
     fn wrapped_new(permits: usize) -> Arc<Self>;
     fn wrapped_try_acquire_owned(self: &Arc<Self>) -> Result<Option<OwnedSemaphorePermit>, Closed>;
     async fn wrapped_acquire_owned(self: &Arc<Self>) -> Result<OwnedSemaphorePermit, Closed>;
+    fn close(&self) {}
 }
 
 #[cfg(any(feature = "tokio-rt"))]
@@ -21,10 +22,19 @@ impl SemaphoreWrap for Semaphore {
         Arc::new(Semaphore::new(permits))
     }
     fn wrapped_try_acquire_owned(self: &Arc<Self>) -> Result<Option<OwnedSemaphorePermit>, Closed> {
-        Ok(self.clone().try_acquire_owned().ok())
+        use tokio::sync::TryAcquireError::*;
+
+        match self.clone().try_acquire_owned() {
+            Ok(p) => Ok(Some(p)),
+            Err(NoPermits) => Ok(None),
+            Err(Closed) => Err(crate::compat::Closed),
+        }
     }
     async fn wrapped_acquire_owned(self: &Arc<Self>) -> Result<OwnedSemaphorePermit, Closed> {
-        Ok(self.clone().acquire_owned().await)
+        self.clone().acquire_owned().await.map_err(|_| Closed)
+    }
+    fn close(&self) {
+        self.close();
     }
 }
 
