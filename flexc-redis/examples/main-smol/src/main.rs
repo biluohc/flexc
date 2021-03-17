@@ -2,13 +2,15 @@ use flexc_redis::{Pool, RedisConnectionManager};
 use redis::AsyncCommands;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::task;
 
 const TEST_KEY: &'static str = "flexc::redis::test";
 const REDIS_URL: &str = "redis://127.0.0.1:6379/";
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    smol::block_on(fun())
+}
+
+async fn fun() {
     let manager = RedisConnectionManager::new(REDIS_URL).unwrap();
     let pool = Arc::new(Pool::builder().maxsize(20).build(manager).await.unwrap());
     println!("state: {:?}", pool.state());
@@ -24,12 +26,13 @@ async fn main() {
     for i in 0..MAX {
         let pool = pool.clone();
         let tx_c = tx.clone();
-        task::spawn(async move {
+        smol::spawn(async move {
             let mut conn = pool.get().await.unwrap();
             let s: String = conn.get(TEST_KEY).await.unwrap();
             assert_eq!(s.as_str(), "hello");
             tx_c.send(i).await.unwrap();
-        });
+        })
+        .detach();
     }
     for _ in 0..MAX {
         rx.recv().await.unwrap();
@@ -38,4 +41,9 @@ async fn main() {
     println!("state: {:?}, cost: {:?}", pool.state(), now.elapsed());
     conn.take();
     println!("state: {:?}, cost: {:?}", pool.state(), now.elapsed());
+    println!(
+        "state: {}, cost: {:?}",
+        serde_json::to_string(&pool.state()).unwrap(),
+        now.elapsed()
+    );
 }
