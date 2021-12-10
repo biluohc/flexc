@@ -3,6 +3,7 @@ use std::{
     time::*,
 };
 
+use tokio::time::timeout;
 // cargo test --manifest-path flexc/Cargo.toml --release -- --test-threads=1 --nocapture
 #[cfg(any(feature = "tokio-rt"))]
 use tokio::{
@@ -162,6 +163,55 @@ async fn test_basic() {
     assert_eq!(status.size, 3);
     assert_eq!(status.idle, 3);
     assert_eq!(manager.size(), 3);
+}
+
+#[atest]
+async fn test_reconnect_for_use() {
+    let manager = MockManager::new();
+    let duration = Some(Duration::from_secs(1));
+    let pool = Pool::builder()
+        .maxsize(1)
+        .timeout(duration)
+        .check(duration)
+        .build_unchecked(manager.clone());
+
+    let con = pool.get().await.unwrap();
+    let status = pool.state();
+    assert_eq!(status.inuse, 1);
+    assert_eq!(status.maxsize, 1);
+    assert_eq!(status.idle, 0);
+    assert_eq!(status.empty, 0);
+    drop(con);
+
+    async fn do_something_timeout(p: &Pool, duration: Duration) {
+        timeout(duration, async {
+            println!("0.{:?}", p.state());
+            let mut con = p.get().await.unwrap();
+            con.set_reconnect(true);
+            // use it
+            println!("1.{:?}", p.state());
+            sleep(duration + duration).await;
+            // reset
+            con.set_reconnect(false);
+            println!("2.{:?}", p.state());
+        })
+        .await
+        .ok();
+    }
+
+    do_something_timeout(&pool, duration.unwrap()).await;
+    let status = pool.state();
+    assert_eq!(status.inuse, 0);
+    assert_eq!(status.maxsize, 1);
+    assert_eq!(status.idle, 0);
+    assert_eq!(status.empty, 1);
+
+    let _con = pool.get().await.unwrap();
+    let status = pool.state();
+    assert_eq!(status.inuse, 1);
+    assert_eq!(status.maxsize, 1);
+    assert_eq!(status.idle, 0);
+    assert_eq!(status.empty, 0);
 }
 
 #[atest]

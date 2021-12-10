@@ -316,6 +316,7 @@ pub(crate) struct Conn<M: Manager> {
     shared: Weak<SharedPool<M>>,
     con: Option<M::Connection>,
     permit: Option<OwnedSemaphorePermit>,
+    reconnect: bool,
 }
 
 impl<M: Manager> fmt::Debug for Conn<M> {
@@ -340,6 +341,7 @@ impl<M: Manager> Conn<M> {
             time: Duration::from_secs(0),
             con: None,
             permit: None,
+            reconnect: false,
         }
     }
     pub(crate) fn is_empty(&self) -> bool {
@@ -365,6 +367,13 @@ impl<M: Manager> PooledConnection<M> {
     /// Take this connection from the pool permanently.
     pub fn take(mut self) -> M::Connection {
         self.0.as_mut().unwrap().con.take().unwrap()
+    }
+    /// the pool will reconnect the connection after recycle it if reconnect
+    pub fn set_reconnect(&mut self, reconnect: bool) {
+        self.0.as_mut().unwrap().reconnect = reconnect;
+    }
+    pub fn reconnect(&self) -> bool {
+        self.0.as_ref().unwrap().reconnect
     }
 }
 
@@ -397,10 +406,12 @@ impl<M: Manager> Drop for PooledConnection<M> {
     fn drop(&mut self) {
         let mut conn = self.0.take().unwrap();
 
-        if conn.is_incheck() {
+        if conn.is_incheck() || conn.reconnect {
             //  check failed when get-xxx timeout(inner future dropped, recycle not run), should giveup the connection
             conn.con.take();
         }
+        // reset
+        conn.reconnect = false;
 
         if conn.is_empty() {
             conn.status.set_empty(conn.idx);
