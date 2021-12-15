@@ -1,3 +1,6 @@
+## 0.4.1/0.2.1 (2021-12-15)
+* add reconnect flag for PooledConnection
+
 ## 0.4.0 (2021-03-17)
 * update tokio to 1.0
 
